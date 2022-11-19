@@ -1,6 +1,6 @@
 #include "utils.h"
 #include <intrin.h>
-
+#include <fstream>
 namespace Utils
 {
     std::string getCPUName()
@@ -39,5 +39,28 @@ namespace Utils
         {
             throw GetLastError();
         }
+    }
+
+    VOID saveCSV(const std::string& fileName,std::vector<std::vector<WORD>>& result)
+    {
+        std::fstream fs;
+        fs.open(fileName, std::ios::out | std::ios::trunc);
+        if (!fs.is_open()) throw "unable write to file";
+
+        DWORD maxLen = result.size();
+
+        for (DWORD i = 0; i < maxLen; i++)
+        {
+            for (DWORD j = 0; j < maxLen; j++)
+            {
+                if(j<i)
+                    fs << result[i][j];
+                if (j != maxLen - 1)
+                    fs << ',';
+            }
+            fs << '\n';
+        }
+
+        if (fs.is_open()) fs.close();
     }
 }

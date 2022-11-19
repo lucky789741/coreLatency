@@ -1,6 +1,5 @@
 #include <iostream>
 #include <iomanip>
-#include <fstream>
 #include <boost/program_options.hpp>
 #include "utils.h"
 #include "bench.h"
@@ -25,20 +24,15 @@ int main(INT argc,CHAR* argv[])
         std::cout << desc << std::endl;
         return 1;
     }
-    std::string fileName;
-    std::fstream fs;
-    if (vm.count("output"))
-    {
-        fileName = vm["output"].as<std::string>();
-        fs.open(fileName, std::ios::out | std::ios::trunc);
-    }
     DWORD64 iters = 100000;
-    if (vm.count("iters")) iters = vm["iters"].as<DWORD64>();
+    if (vm.count("iters"))
+        iters = vm["iters"].as<DWORD64>();
 
     Utils::setHighestPriority();
     DWORD cpuCount = Utils::getCPUCount();
     std::barrier syncPoint(2);
     std::chrono::high_resolution_clock clock = std::chrono::high_resolution_clock();
+    std::vector<std::vector<WORD>> result;
     
     std::cout << "CPU: " << Utils::getCPUName() << std::endl;
     std::cout << "Number of Logical Processors: " << cpuCount << std::endl;
@@ -47,26 +41,27 @@ int main(INT argc,CHAR* argv[])
     for (DWORD i = 0; i < cpuCount; i++)
         std::cout << std::setw(4) << i;
     std::cout << '\n';
-    DWORD64 lat;
+    WORD lat;
     for (DWORD i = 0; i < cpuCount; i++)
     {
         std::cout <<std::setw(4) << i;
+        result.push_back(std::vector<WORD>());
         for (DWORD j = 0; j <= i; j++)
         {
             if (i == j)
             {
-                std::cout << std::setw(4) << "0";
-                fs << '0' << ',';
+                std::cout << std::setw(4) << " ";
+                result[i].push_back(0);
                 continue;
             }
             lat = Bench::pingPong(i, j, iters, syncPoint, clock);
+            result[i].push_back(lat);
             std::cout << std::setw(4) << lat;
-            fs << lat << ',';
         }
         std::cout << '\n';
-        fs << '\n';
     }
-    if (fs.is_open()) fs.close();
-
+    
+    if (vm.count("output"))
+        Utils::saveCSV(vm["output"].as<std::string>(),result);
 }
 

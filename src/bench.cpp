@@ -9,7 +9,7 @@ namespace Bench
         return state.compare_exchange_weak(expected, desired, std::memory_order_relaxed, std::memory_order_relaxed);
     }
 
-    DOUBLE pingPong(DWORD pingCore, DWORD pongCore, DWORD iters,
+    DOUBLE pingPong(DWORD pingCore, DWORD pongCore, DWORD64 iters,
         std::barrier<std::_No_completion_function>& syncPoint,
         std::chrono::high_resolution_clock& clock)
     {
