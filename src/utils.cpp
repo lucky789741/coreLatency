@@ -32,6 +32,7 @@ namespace Utils
         {
             throw GetLastError();
         }
+        Sleep(100);
     }
     VOID setHighestPriority()
     {
