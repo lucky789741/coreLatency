@@ -13,7 +13,8 @@ int main(INT argc,CHAR* argv[])
     desc.add_options()
         ("help","Print this message")
         ("output",po::value<std::string>(),"Output result to specified csv file name.\n!!WILL OVERWRITE THE FILE WITH SAME NAME!!")
-        ("iters",po::value<DWORD64>(),"More iteration may lead to accurate result.\n(default:100000)")
+        ("iters",po::value<DWORD64>(),"Iteration per samples.\n(default:1000)")
+        ("samples",po::value<DWORD64>(),"More sample lead to better result\n(default:300)")
         ;
     po::variables_map vm;
     po::store(po::parse_command_line(argc,argv,desc),vm);
@@ -24,9 +25,12 @@ int main(INT argc,CHAR* argv[])
         std::cout << desc << std::endl;
         return 1;
     }
-    DWORD64 iters = 100000;
+    DWORD64 iters = 1000;
     if (vm.count("iters"))
         iters = vm["iters"].as<DWORD64>();
+    DWORD64 samples = 300;
+    if (vm.count("samples"))
+        iters = vm["samples"].as<DWORD64>();
 
     Utils::setHighestPriority();
     DWORD cpuCount = Utils::getCPUCount();
@@ -35,8 +39,9 @@ int main(INT argc,CHAR* argv[])
     std::vector<std::vector<WORD>> result;
     
     std::cout << "CPU: " << Utils::getCPUName() << std::endl;
-    std::cout << "Number of Logical Processors: " << cpuCount << std::endl;
-    std::cout << "Number of iterations: " << iters << '\n' << std::endl;
+    std::cout << "Num of CPUs: " << cpuCount << std::endl;
+    std::cout << "Num of iters: " << iters << std::endl;
+    std::cout << "Num of samples: " << samples << '\n' << std::endl;
     std::cout << std::setw(4) <<' ';
     for (DWORD i = 0; i < cpuCount; i++)
         std::cout << std::setw(4) << i;
@@ -54,7 +59,7 @@ int main(INT argc,CHAR* argv[])
                 result[i].push_back(0);
                 continue;
             }
-            lat = Bench::pingPong(i, j, iters, syncPoint, clock);
+            lat = Bench::pingPong(i, j, iters, samples,syncPoint, clock);
             result[i].push_back(lat);
             std::cout << std::setw(4) << lat;
         }

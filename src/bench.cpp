@@ -1,5 +1,6 @@
 #include "bench.h"
 #include "utils.h"
+#include <numeric>
 
 namespace Bench
 {
@@ -9,13 +10,15 @@ namespace Bench
         return state.compare_exchange_weak(expected, desired, std::memory_order_relaxed, std::memory_order_relaxed);
     }
 
-    DOUBLE pingPong(DWORD pingCore, DWORD pongCore, DWORD64 iters,
+    DOUBLE pingPong(DWORD pingCore, DWORD pongCore, DWORD64 iters, DWORD64 samples,
         std::barrier<std::_No_completion_function>& syncPoint,
         std::chrono::high_resolution_clock& clock)
     {
+        //extra warm up
+        samples++;
         std::chrono::high_resolution_clock::time_point start, end;
+        std::vector<DOUBLE> durationSamples;
         DOUBLE duration;
-        DWORD64 iterations = iters;
         Utils::setAffinity(pingCore);
         alignas(64) std::atomic<State> state = PONG;
 
@@ -38,24 +41,31 @@ namespace Bench
             });
         //barrier make sure both thread changed Affinity before start
         syncPoint.arrive_and_wait();
-        start = clock.now();
-        while (iterations--)
-        {
-            //same thing
-            //keep trying to change state to PING if state is PONG
-            //this thread change it to PING and far thread change it to PONG
-            //so we'll measure two way latency
-            while (!casSet(state, PONG, PING)) {}
+        for (DWORD64 j = 0; j < samples; j++) {
+            DWORD64 i = iters;
+            start = clock.now();
+            while (i--)
+            {
+                //same thing
+                //keep trying to change state to PING if state is PONG
+                //this thread change it to PING and far thread change it to PONG
+                //so we'll measure two way latency
+                while (!casSet(state, PONG, PING)) {}
+            }
+            end = clock.now();
+            //div it by 2.0 to get one way latency
+            duration = (DOUBLE)(end - start).count() / 2.0 / iters;
+            durationSamples.push_back(duration);
         }
-        end = clock.now();
         
         //try to flip it to FINISH to end far thread's loop
         while (!casSet(state, PONG, FINISH)) {}
 
         pong.join();
 
-        //div it by 2.0 to get one way latency
-        duration = (DOUBLE)(end - start).count() / 2.0 / iters;
+        duration = std::accumulate(durationSamples.begin()+1,durationSamples.end(),0.0);
+
+        duration = duration / (samples - 1);
 
         return duration;
 
