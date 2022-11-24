@@ -30,7 +30,7 @@ int main(INT argc,CHAR* argv[])
         iters = vm["iters"].as<DWORD64>();
     DWORD64 samples = 300;
     if (vm.count("samples"))
-        iters = vm["samples"].as<DWORD64>();
+        samples = vm["samples"].as<DWORD64>();
 
     Utils::setHighestPriority();
     DWORD cpuCount = Utils::getCPUCount();
