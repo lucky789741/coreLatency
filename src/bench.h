@@ -2,7 +2,7 @@
 #include <Windows.h>
 #include <atomic>
 #include <barrier>
-#include <chrono>
+#include <thread>
 
 enum State :CHAR
 {
@@ -13,10 +13,7 @@ enum State :CHAR
 
 namespace Bench
 {
-    //wrapper for compare_exchange_weak
-    //return true if state's current value is eqaul to expected and it will change value to newState(desired)
-	BOOL casSet(std::atomic<State>& state, State expected, State desired);
-    DOUBLE pingPong(DWORD pingCore, DWORD pongCore, DWORD64 iters, DWORD64 samples,
-        std::barrier<std::_No_completion_function>& syncPoint,
-        std::chrono::high_resolution_clock& clock);
+    BOOL casSet(std::atomic<State>& state, State expected, State desired);
+    DOUBLE pingPong(DWORD pingCore, DWORD pongCore, DWORD64 iters, DWORD64 samples, DWORD64 warmupIters,
+        std::barrier<std::_No_completion_function>& syncPoint);
 }
