@@ -149,7 +149,7 @@ int main(INT argc, CHAR* argv[])
         std::cout << "\n" << std::endl;
 
         // CSV header for streaming output
-        std::cout << "core,size(KB),ns\n";
+        std::cout << "cpu,core,size(KB),ns\n";
 
         // Per-core outer loop: one core finishes all sizes before next core
         DWORD coreCount = lastCore - firstCore + 1;
@@ -160,7 +160,7 @@ int main(INT argc, CHAR* argv[])
             fs.open(outputFile, std::ios::out | std::ios::trunc);
             if (!fs.is_open())
                 throw std::runtime_error("Unable to write to: " + outputFile);
-            fs << "core,size(KB),ns\n";
+            fs << "cpu,core,size(KB),ns\n";
         }
 
         for (DWORD ci = 0; ci < coreCount; ci++) {
@@ -178,12 +178,14 @@ int main(INT argc, CHAR* argv[])
                 DOUBLE lat = Utils::median(sampleDurations);
                 DOUBLE sizeKB = (DOUBLE)validSizes[si] / 1024.0;
 
-                std::cout << core << ','
+                std::cout << Utils::getCPUName() << ','
+                          << core << ','
                           << std::fixed << std::setprecision(1) << sizeKB << ','
                           << std::fixed << std::setprecision(1) << lat << '\n';
 
                 if (fs.is_open()) {
-                    fs << core << ','
+                    fs << Utils::getCPUName() << ','
+                       << core << ','
                        << std::fixed << std::setprecision(1) << sizeKB << ','
                        << std::fixed << std::setprecision(1) << lat << '\n';
                 }
