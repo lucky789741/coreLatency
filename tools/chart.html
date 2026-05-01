@@ -140,8 +140,17 @@ function render() {
     hovertemplate: `<b>${t.cpu}</b><br>core${t.core}  size=%{x:.1f} KB  ns=%{y:.1f}<extra></extra>`,
   }));
 
+  // Compute data range for axis bounds
+  let allX = allTraces.flatMap(t => t.x);
+  let xMin = Math.min(...allX);
+  let xMax = Math.max(...allX);
+  // Extend range to next power of 10 so ticks cover full span
+  let xRangeHi = Math.pow(10, Math.ceil(Math.log10(xMax)));
+  let xRangeLo = Math.pow(10, Math.floor(Math.log10(xMin)));
+
   let layout = {
-    xaxis: { title: 'Buffer size (KB)', type: 'log', gridcolor: '#333', zeroline: false },
+    xaxis: { title: 'Buffer size (KB)', type: 'log', range: [Math.log10(xRangeLo), Math.log10(xRangeHi)],
+             dtick: 1, gridcolor: '#333', zeroline: false },
     yaxis: { title: 'Latency (ns)', gridcolor: '#333', zeroline: false },
     legend: { orientation: 'h', y: -0.2, font: { color: '#ccc', size: 11 } },
     plot_bgcolor: '#1a1a2e',
