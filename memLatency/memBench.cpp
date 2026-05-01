@@ -82,10 +82,12 @@ static void buildChain(char* buf, size_t bufSize, DWORD stride)
 #define FIVE  ONE ONE ONE ONE ONE
 #define TEN   FIVE FIVE
 
-__declspec(noinline) static void escape(void*) {}
+// Volatile sink prevents LTCG from optimizing away the pointer chase.
+// __declspec(noinline) is not enough when /LTCG is enabled.
+static char** volatile g_sink;
 
 DOUBLE measure(size_t bufferSize, DWORD stride, DWORD64 iters,
-               DWORD64 warmupIters, DWORD64 samples)
+               DWORD64 warmupIters)
 {
     size_t slotCount = bufferSize / stride;
     if (slotCount < 2)
@@ -97,39 +99,34 @@ DOUBLE measure(size_t bufferSize, DWORD stride, DWORD64 iters,
     if (!buf)
         throw std::bad_alloc();
 
-    std::vector<DOUBLE> durations;
-    durations.reserve(samples);
+    buildChain(buf, adjustedSize, stride);
+    char** p = (char**)buf;
 
-    for (DWORD64 s = 0; s < samples; s++) {
-        buildChain(buf, adjustedSize, stride);
-        char** p = (char**)buf;
-
-        // Warmup: full-chain traversals, unrolled
-        DWORD64 warmupLoads = warmupIters;
-        while (warmupLoads >= 10) {
-            TEN;
-            warmupLoads -= 10;
-        }
-        while (warmupLoads-- > 0) ONE;
-
-        // Timed traversal
-        DWORD64 remaining = iters;
-        auto start = std::chrono::high_resolution_clock::now();
-        while (remaining >= 10) {
-            TEN;
-            remaining -= 10;
-        }
-        while (remaining-- > 0) ONE;
-        auto end = std::chrono::high_resolution_clock::now();
-
-        DOUBLE duration = (DOUBLE)(end - start).count() / iters;
-        durations.push_back(duration);
-
-        escape((void*)p);
+    // Warmup: full-chain traversals, unrolled
+    DWORD64 warmupLoads = warmupIters;
+    while (warmupLoads >= 10) {
+        TEN;
+        warmupLoads -= 10;
     }
+    while (warmupLoads-- > 0) ONE;
+
+    // Timed traversal
+    DWORD64 remaining = iters;
+    auto start = std::chrono::high_resolution_clock::now();
+    while (remaining >= 10) {
+        TEN;
+        remaining -= 10;
+    }
+    while (remaining-- > 0) ONE;
+    auto end = std::chrono::high_resolution_clock::now();
+
+    // Prevent elimination: store p to volatile global
+    g_sink = p;
 
     VirtualFree(buf, 0, MEM_RELEASE);
-    return Utils::median(durations);
+
+    DOUBLE duration = (DOUBLE)(end - start).count() / iters;
+    return duration;
 }
 
 } // namespace MemBench

@@ -55,21 +55,21 @@ int main(INT argc, CHAR* argv[])
 {
     try
     {
-        DWORD64 iters = 1000;
-        DWORD64 samples = 300;
+        DWORD64 iters = 10;
         DWORD64 warmupIters = 0; // 0 means same as iters
         size_t maxSizeKB = 262144;
         std::string outputFile;
         bool listSizes = false;
+        int targetCore = -1; // -1 means all cores
 
         po::options_description desc("Available options");
         desc.add_options()
             ("help", "Print this message")
-            ("iters", po::value<DWORD64>(), "Pointer loads per sample (default: 1000)")
-            ("samples", po::value<DWORD64>(), "Timed batches per core per buffer size (default: 300)")
+            ("iters", po::value<DWORD64>(), "Pointer loads per measurement (default: 10)")
             ("warmup", po::value<DWORD64>(), "Warmup loads before timing (default: same as --iters)")
             ("max-size", po::value<size_t>(), "Max buffer size in KB, must be a valid log-scale step (default: 262144)")
             ("list-sizes", po::bool_switch(&listSizes), "Print valid buffer sizes in KB and exit")
+            ("core", po::value<int>(), "Test only the specified core (default: all cores)")
             ("output", po::value<std::string>(), "Save CSV to file (overwrites if exists)")
             ;
 
@@ -85,14 +85,15 @@ int main(INT argc, CHAR* argv[])
 
         if (vm.count("iters"))
             iters = vm["iters"].as<DWORD64>();
-        if (vm.count("samples"))
-            samples = vm["samples"].as<DWORD64>();
         if (vm.count("warmup"))
             warmupIters = vm["warmup"].as<DWORD64>();
         else
             warmupIters = iters;
         if (vm.count("max-size")) {
             maxSizeKB = vm["max-size"].as<size_t>();
+        }
+        if (vm.count("core")) {
+            targetCore = vm["core"].as<int>();
         }
         if (vm.count("output"))
             outputFile = vm["output"].as<std::string>();
@@ -117,6 +118,15 @@ int main(INT argc, CHAR* argv[])
         DWORD cpuCount = Utils::getCPUCount();
         DWORD cacheLine = MemBench::getCacheLineSize();
 
+        // Validate --core
+        if (targetCore >= (int)cpuCount) {
+            std::cerr << "Error: core " << targetCore
+                      << " out of range (0-" << cpuCount - 1 << ")\n";
+            return 1;
+        }
+        DWORD firstCore = (targetCore >= 0) ? (DWORD)targetCore : 0;
+        DWORD lastCore  = (targetCore >= 0) ? (DWORD)targetCore : cpuCount - 1;
+
         // Generate valid buffer sizes in bytes
         auto validSizes = MemBench::generateValidSizes(maxSizeKB);
 
@@ -124,8 +134,7 @@ int main(INT argc, CHAR* argv[])
         std::cout << "CPU: " << Utils::getCPUName() << std::endl;
         std::cout << "Cores: " << cpuCount << std::endl;
         std::cout << "Cache line: " << cacheLine << " bytes" << std::endl;
-        std::cout << "Iters: " << iters << ", Samples: " << samples
-                  << ", Warmup: " << warmupIters << std::endl;
+        std::cout << "Iters: " << iters << ", Warmup: " << warmupIters << std::endl;
         std::cout << "Max buffer size (KB): " << maxSizeKB << '\n' << std::endl;
 
         const auto& topo = Utils::getCoreTopology();
@@ -136,34 +145,35 @@ int main(INT argc, CHAR* argv[])
 
         // CSV header
         std::cout << "size(KB)";
-        for (DWORD c = 0; c < cpuCount; c++)
+        for (DWORD c = firstCore; c <= lastCore; c++)
             std::cout << ',' << 'c' << c << '(' << (INT)topo[c].efficiencyClass << ')';
         std::cout << '\n';
 
-        // Per-core per-size measurement
-        std::vector<std::vector<DOUBLE>> results;
-        for (const auto& sizeBytes : validSizes) {
-            std::vector<DOUBLE> row;
-            row.reserve(cpuCount);
+        // Per-core outer loop: one core finishes all sizes before next core
+        // results[coreOffset][sizeIndex] -> latency
+        DWORD coreCount = lastCore - firstCore + 1;
+        std::vector<std::vector<DOUBLE>> results(coreCount,
+            std::vector<DOUBLE>(validSizes.size()));
 
-            for (DWORD core = 0; core < cpuCount; core++) {
-                Utils::setAffinity(core);
-                DOUBLE lat = MemBench::measure(sizeBytes, cacheLine,
-                                               iters, warmupIters, samples);
-                row.push_back(lat);
+        for (DWORD ci = 0; ci < coreCount; ci++) {
+            DWORD core = firstCore + ci;
+            Utils::setAffinity(core);
+            std::cerr << "Measuring core " << core << "..." << std::endl;
+
+            for (size_t si = 0; si < validSizes.size(); si++) {
+                results[ci][si] = MemBench::measure(validSizes[si], cacheLine,
+                                                     iters, warmupIters);
             }
-
-            results.push_back(row);
         }
 
-        // Print CSV body
+        // Print CSV body: rows = sizes, columns = cores
         auto csvOut = [&](std::ostream& os) {
-            for (size_t r = 0; r < validSizes.size(); r++) {
-                DOUBLE sizeKB = (DOUBLE)validSizes[r] / 1024.0;
+            for (size_t si = 0; si < validSizes.size(); si++) {
+                DOUBLE sizeKB = (DOUBLE)validSizes[si] / 1024.0;
                 os << std::fixed << std::setprecision(1) << sizeKB;
-                for (DWORD c = 0; c < cpuCount; c++) {
+                for (DWORD ci = 0; ci < coreCount; ci++) {
                     os << ',' << std::fixed << std::setprecision(1)
-                       << results[r][c];
+                       << results[ci][si];
                 }
                 os << '\n';
             }
