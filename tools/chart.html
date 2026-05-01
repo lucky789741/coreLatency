@@ -166,6 +166,7 @@ function render() {
   };
 
   Plotly.react(chartDiv, plotTraces, layout, { responsive: true });
+  Plotly.Plots.resize(chartDiv);
 
   chartDiv.classList.add('visible');
   drop.classList.add('has-data');
