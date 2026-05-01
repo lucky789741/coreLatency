@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Latency Chart</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; flex-direction: column; }
+  .toolbar { display: flex; gap: 8px; padding: 12px 16px; background: #16213e; border-bottom: 1px solid #0f3460; align-items: center; }
+  .toolbar button { padding: 8px 16px; border: 1px solid #0f3460; border-radius: 4px; cursor: pointer; font-size: 14px; background: #0f3460; color: #eee; }
+  .toolbar button:hover { background: #1a508b; }
+  .toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .toolbar .file-count { margin-left: auto; font-size: 13px; color: #888; }
+  #drop { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 300px; margin: 16px; border: 2px dashed #0f3460; border-radius: 8px; transition: border-color 0.2s, background 0.2s; }
+  #drop.drag-over { border-color: #e94560; background: rgba(233,69,96,0.05); }
+  #drop.has-data { min-height: 60px; margin: 8px 16px; }
+  #drop p { color: #666; font-size: 18px; pointer-events: none; }
+  #chart { flex: 1; min-height: 500px; display: none; margin: 0 16px 16px; }
+  #chart.visible { display: block; }
+  .toast { position: fixed; top: 16px; right: 16px; padding: 12px 20px; border-radius: 4px; font-size: 14px; z-index: 999; animation: fadeIn 0.3s; }
+  .toast.error { background: #e94560; color: #fff; }
+  .toast.info { background: #0f3460; color: #eee; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button id="btnClear" onclick="clearAll()" disabled>Clear</button>
+  <button id="btnExport" onclick="exportPNG()" disabled>Export PNG</button>
+  <span class="file-count" id="fileCount"></span>
+</div>
+
+<div id="drop"><p>Drop CSV files here</p></div>
+<div id="chart"></div>
+
+<script src="vendor/plotly-latest.min.js"></script>
+<script src="vendor/papaparse.min.js"></script>
+<script>
+// --- State ---
+let allTraces = [];       // { cpu, core, filename, x:[], y:[] }
+let fileNames = new Set();
+
+// --- djb2 hash ---
+function djb2(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash) + str.charCodeAt(i);
+  return hash >>> 0;
+}
+
+// --- Color from CPU name + core index ---
+function traceColor(cpu, coreIdx, coreCount) {
+  let base = (djb2(cpu) % 360);
+  let gap = Math.max(8, Math.floor(60 / Math.max(coreCount, 1)));
+  let hue = (base + coreIdx * gap) % 360;
+  return `hsl(${hue}, 70%, 50%)`;
+}
+
+// --- Drop zone ---
+const drop = document.getElementById('drop');
+const chartDiv = document.getElementById('chart');
+const btnClear = document.getElementById('btnClear');
+const btnExport = document.getElementById('btnExport');
+const fileCount = document.getElementById('fileCount');
+
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag-over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('drag-over');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.csv'));
+  if (files.length === 0) { toast('No CSV files found', 'error'); return; }
+  files.forEach(f => parseCSV(f));
+});
+
+// --- CSV parsing ---
+function parseCSV(file) {
+  fileNames.add(file.name);
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: true,
+    complete: function(results) {
+      if (results.errors.length > 0) {
+        toast(`Parse error in ${file.name}: ${results.errors[0].message}`, 'error');
+        return;
+      }
+      if (!results.meta.fields.includes('cpu') || !results.meta.fields.includes('core') ||
+          !results.meta.fields.includes('size(KB)') || !results.meta.fields.includes('ns')) {
+        toast(`Missing required columns in ${file.name} (need: cpu,core,size(KB),ns)`, 'error');
+        return;
+      }
+
+      // Group rows by (cpu, core)
+      let groups = {};
+      results.data.forEach(row => {
+        if (row.cpu == null || row.core == null || row['size(KB)'] == null || row.ns == null) return;
+        let key = row.cpu + '|' + row.core;
+        if (!groups[key]) groups[key] = { cpu: row.cpu, core: row.core, x: [], y: [] };
+        groups[key].x.push(row['size(KB)']);
+        groups[key].y.push(row.ns);
+      });
+
+      // Sort groups by core
+      let entries = Object.values(groups).sort((a, b) => a.core - b.core);
+      let coreCount = entries.length;
+
+      entries.forEach(g => {
+        allTraces.push({
+          cpu: g.cpu,
+          core: g.core,
+          filename: file.name,
+          x: g.x,
+          y: g.y,
+          color: traceColor(g.cpu, g.core, coreCount),
+        });
+      });
+
+      render();
+      toast(`Loaded ${file.name} (${entries.length} cores)`, 'info');
+    },
+    error: function(err) {
+      toast(`Failed to read ${file.name}: ${err.message}`, 'error');
+    }
+  });
+}
+
+// --- Plotly render ---
+function render() {
+  if (allTraces.length === 0) return;
+
+  let plotTraces = allTraces.map(t => ({
+    x: t.x,
+    y: t.y,
+    type: 'scatter',
+    mode: 'lines',
+    name: t.cpu + ' / core' + t.core,
+    line: { color: t.color, width: 2 },
+    hovertemplate: `<b>${t.cpu}</b><br>core${t.core}  size=%{x:.1f} KB  ns=%{y:.1f}<extra></extra>`,
+  }));
+
+  let layout = {
+    xaxis: { title: 'Buffer size (KB)', type: 'log', gridcolor: '#333', zeroline: false },
+    yaxis: { title: 'Latency (ns)', gridcolor: '#333', zeroline: false },
+    legend: { orientation: 'h', y: -0.2, font: { color: '#ccc', size: 11 } },
+    plot_bgcolor: '#1a1a2e',
+    paper_bgcolor: '#1a1a2e',
+    font: { color: '#eee' },
+    margin: { t: 20, r: 20, b: 100, l: 60 },
+  };
+
+  Plotly.react(chartDiv, plotTraces, layout, { responsive: true });
+
+  chartDiv.classList.add('visible');
+  drop.classList.add('has-data');
+  btnClear.disabled = false;
+  btnExport.disabled = false;
+  fileCount.textContent = fileNames.size + ' file(s) loaded';
+}
+
+// --- Clear ---
+function clearAll() {
+  allTraces = [];
+  fileNames.clear();
+  Plotly.purge(chartDiv);
+  chartDiv.classList.remove('visible');
+  drop.classList.remove('has-data');
+  btnClear.disabled = true;
+  btnExport.disabled = true;
+  fileCount.textContent = '';
+  toast('Cleared all data', 'info');
+}
+
+// --- Export PNG ---
+function exportPNG() {
+  if (allTraces.length === 0) return;
+  Plotly.downloadImage(chartDiv, { format: 'png', width: 1920, height: 1080, filename: 'latency-chart' });
+}
+
+// --- Toast ---
+function toast(msg, type) {
+  let el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+</script>
+</body>
+</html>
