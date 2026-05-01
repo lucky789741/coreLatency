@@ -181,13 +181,6 @@ window.addEventListener('resize', () => {
   }
 });
 
-  chartDiv.classList.add('visible');
-  drop.classList.add('has-data');
-  btnClear.disabled = false;
-  btnExport.disabled = false;
-  fileCount.textContent = fileNames.size + ' file(s) loaded';
-}
-
 // --- Clear ---
 function clearAll() {
   allTraces = [];
