@@ -102,7 +102,7 @@ DOUBLE measure(size_t bufferSize, DWORD stride, DWORD64 iters,
 
     for (DWORD64 s = 0; s < samples; s++) {
         buildChain(buf, adjustedSize, stride);
-        char* p = buf;
+        char** p = (char**)buf;
 
         // Warmup: full-chain traversals, unrolled
         DWORD64 warmupLoads = warmupIters;
