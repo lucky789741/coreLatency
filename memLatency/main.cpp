@@ -55,8 +55,9 @@ int main(INT argc, CHAR* argv[])
 {
     try
     {
-        DWORD64 iters = 10;
+        DWORD64 iters = 100;
         DWORD64 warmupIters = 0; // 0 means same as iters
+        DWORD64 samples = 100;
         size_t maxSizeKB = 262144;
         std::string outputFile;
         bool listSizes = false;
@@ -65,7 +66,8 @@ int main(INT argc, CHAR* argv[])
         po::options_description desc("Available options");
         desc.add_options()
             ("help", "Print this message")
-            ("iters", po::value<DWORD64>(), "Pointer loads per measurement (default: 10)")
+            ("iters", po::value<DWORD64>(), "Pointer loads per measurement (default: 100)")
+            ("samples", po::value<DWORD64>(), "Measurements per (core, size), median reported (default: 100)")
             ("warmup", po::value<DWORD64>(), "Warmup loads before timing (default: same as --iters)")
             ("max-size", po::value<size_t>(), "Max buffer size in KB, must be a valid log-scale step (default: 262144)")
             ("list-sizes", po::bool_switch(&listSizes), "Print valid buffer sizes in KB and exit")
@@ -85,6 +87,8 @@ int main(INT argc, CHAR* argv[])
 
         if (vm.count("iters"))
             iters = vm["iters"].as<DWORD64>();
+        if (vm.count("samples"))
+            samples = vm["samples"].as<DWORD64>();
         if (vm.count("warmup"))
             warmupIters = vm["warmup"].as<DWORD64>();
         else
@@ -134,7 +138,8 @@ int main(INT argc, CHAR* argv[])
         std::cout << "CPU: " << Utils::getCPUName() << std::endl;
         std::cout << "Cores: " << cpuCount << std::endl;
         std::cout << "Cache line: " << cacheLine << " bytes" << std::endl;
-        std::cout << "Iters: " << iters << ", Warmup: " << warmupIters << std::endl;
+        std::cout << "Iters: " << iters << ", Samples: " << samples
+                  << ", Warmup: " << warmupIters << std::endl;
         std::cout << "Max buffer size (KB): " << maxSizeKB << '\n' << std::endl;
 
         const auto& topo = Utils::getCoreTopology();
@@ -163,8 +168,14 @@ int main(INT argc, CHAR* argv[])
             Utils::setAffinity(core);
 
             for (size_t si = 0; si < validSizes.size(); si++) {
-                DOUBLE lat = MemBench::measure(validSizes[si], cacheLine,
-                                                iters, warmupIters);
+                std::vector<DOUBLE> sampleDurations;
+                sampleDurations.reserve(samples);
+                for (DWORD64 sm = 0; sm < samples; sm++) {
+                    sampleDurations.push_back(
+                        MemBench::measure(validSizes[si], cacheLine,
+                                          iters, warmupIters));
+                }
+                DOUBLE lat = Utils::median(sampleDurations);
                 DOUBLE sizeKB = (DOUBLE)validSizes[si] / 1024.0;
 
                 std::cout << core << ','
