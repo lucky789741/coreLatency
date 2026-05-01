@@ -129,15 +129,15 @@ int main(INT argc, CHAR* argv[])
         std::cout << "Max buffer size (KB): " << maxSizeKB << '\n' << std::endl;
 
         const auto& topo = Utils::getCoreTopology();
-        std::cout << "Core topology (E=E-core, P=P-core): ";
+        std::cout << "Core topology (efficiency class): ";
         for (DWORD i = 0; i < cpuCount; i++)
-            std::cout << i << '(' << (topo[i].efficiencyClass == 1 ? 'E' : 'P') << ") ";
+            std::cout << i << '(' << (INT)topo[i].efficiencyClass << ") ";
         std::cout << "\n" << std::endl;
 
         // CSV header
         std::cout << "size(KB)";
         for (DWORD c = 0; c < cpuCount; c++)
-            std::cout << ',' << 'c' << c << '(' << (topo[c].efficiencyClass == 1 ? 'E' : 'P') << ')';
+            std::cout << ',' << 'c' << c << '(' << (INT)topo[c].efficiencyClass << ')';
         std::cout << '\n';
 
         // Per-core per-size measurement
