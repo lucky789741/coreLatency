@@ -143,49 +143,44 @@ int main(INT argc, CHAR* argv[])
             std::cout << i << '(' << (INT)topo[i].efficiencyClass << ") ";
         std::cout << "\n" << std::endl;
 
-        // CSV header
-        std::cout << "size(KB)";
-        for (DWORD c = firstCore; c <= lastCore; c++)
-            std::cout << ',' << 'c' << c << '(' << (INT)topo[c].efficiencyClass << ')';
-        std::cout << '\n';
+        // CSV header for streaming output
+        std::cout << "core,size(KB),ns\n";
 
         // Per-core outer loop: one core finishes all sizes before next core
-        // results[coreOffset][sizeIndex] -> latency
         DWORD coreCount = lastCore - firstCore + 1;
-        std::vector<std::vector<DOUBLE>> results(coreCount,
-            std::vector<DOUBLE>(validSizes.size()));
+
+        // Open output file early for streaming write
+        std::ofstream fs;
+        if (!outputFile.empty()) {
+            fs.open(outputFile, std::ios::out | std::ios::trunc);
+            if (!fs.is_open())
+                throw std::runtime_error("Unable to write to: " + outputFile);
+            fs << "core,size(KB),ns\n";
+        }
 
         for (DWORD ci = 0; ci < coreCount; ci++) {
             DWORD core = firstCore + ci;
             Utils::setAffinity(core);
-            std::cerr << "Measuring core " << core << "..." << std::endl;
 
             for (size_t si = 0; si < validSizes.size(); si++) {
-                results[ci][si] = MemBench::measure(validSizes[si], cacheLine,
-                                                     iters, warmupIters);
+                DOUBLE lat = MemBench::measure(validSizes[si], cacheLine,
+                                                iters, warmupIters);
+                DOUBLE sizeKB = (DOUBLE)validSizes[si] / 1024.0;
+
+                std::cout << core << ','
+                          << std::fixed << std::setprecision(1) << sizeKB << ','
+                          << std::fixed << std::setprecision(1) << lat << '\n';
+
+                if (fs.is_open()) {
+                    fs << core << ','
+                       << std::fixed << std::setprecision(1) << sizeKB << ','
+                       << std::fixed << std::setprecision(1) << lat << '\n';
+                }
             }
         }
 
-        // Print CSV body: rows = sizes, columns = cores
-        auto csvOut = [&](std::ostream& os) {
-            for (size_t si = 0; si < validSizes.size(); si++) {
-                DOUBLE sizeKB = (DOUBLE)validSizes[si] / 1024.0;
-                os << std::fixed << std::setprecision(1) << sizeKB;
-                for (DWORD ci = 0; ci < coreCount; ci++) {
-                    os << ',' << std::fixed << std::setprecision(1)
-                       << results[ci][si];
-                }
-                os << '\n';
-            }
-        };
-
-        csvOut(std::cout);
-
-        if (!outputFile.empty()) {
-            std::ofstream fs(outputFile, std::ios::out | std::ios::trunc);
-            if (!fs.is_open())
-                throw std::runtime_error("Unable to write to: " + outputFile);
-            csvOut(fs);
+        if (fs.is_open()) {
+            fs.close();
             std::cerr << "Results saved to " << outputFile << std::endl;
         }
     }
