@@ -139,7 +139,6 @@ function parseCSV(file) {
 
       // Sort groups by core
       let entries = Object.values(groups).sort((a, b) => a.core - b.core);
-      let coreCount = entries.length;
 
       entries.forEach(g => {
         allTraces.push({
@@ -326,6 +325,7 @@ function render() {
       `<div style="display:flex;gap:6px 16px;flex-wrap:wrap;max-width:420px;font-size:10px;margin-top:2px">` +
       `<div>${col(pts.slice(0, mid))}</div><div>${col(pts.slice(mid))}</div></div>`;
 
+    if (!data.event) { tooltip.style.display = 'none'; return; }
     tooltip.style.display = 'block';
     let x = data.event.clientX + 15;
     let y = data.event.clientY - 10;
@@ -385,84 +385,165 @@ function exportPNG() {
   let wasVis = tooltip && tooltip.style.display === 'block';
   if (wasVis) tooltip.style.display = 'none';
 
-  let chartRect = chartDiv.getBoundingClientRect();
-  let legendRect = htmlLegend.getBoundingClientRect();
+  // Fixed export dimensions independent of viewport size
   let scale = 2;
+  let renderW = 1600;
+  let renderH = 900;
+  let exportW = renderW * scale;
+  let exportH = renderH * scale;
 
-  Plotly.toImage(chartDiv, {
-    format: 'png',
-    width: Math.round(chartRect.width * scale),
-    height: Math.round(chartRect.height * scale),
-  }).then(function (chartUrl) {
-    let img = new Image();
-    img.onload = function () {
-      let lh = Math.round(legendRect.height * scale) + 8 * scale;
-      let cw = img.width;
-      let ch = img.height + lh;
+  // Legend scale: proportionally sized to export image width
+  // (original values tuned for ~2400px wide export)
+  let ls = exportW / 2400;
+  let legendFontSize = Math.round(13 * scale * ls);
+  let legendDotR = Math.round(7 * scale * ls);
+  let legendLineH = legendFontSize + Math.round(6 * scale * ls);
+  let legendX = Math.round(12 * scale * ls);
+  let legendMaxW = exportW - Math.round(24 * scale * ls);
+  let legendDotSpacing = Math.round(4 * scale * ls);
+  let legendCpuGap = Math.round(16 * scale * ls);
 
-      let canvas = document.createElement('canvas');
-      canvas.width = cw;
-      canvas.height = ch;
-      let ctx = canvas.getContext('2d');
+  // Temporarily set chart container to fixed size so Plotly renders at
+  // consistent resolution regardless of browser window size.
+  let prevW = chartDiv.style.width;
+  let prevH = chartDiv.style.height;
+  let prevMinH = chartDiv.style.minHeight;
+  chartDiv.style.width = renderW + 'px';
+  chartDiv.style.height = renderH + 'px';
+  chartDiv.style.minHeight = renderH + 'px';
+  Plotly.Plots.resize(chartDiv);
 
-      // Background
-      ctx.fillStyle = '#1a1a2e';
-      ctx.fillRect(0, 0, cw, ch);
+  // Bump tick/title font size and adjust spacing so labels don't overlap
+  let exportFontSize = 24;
+  Plotly.relayout(chartDiv, {
+    'font.size': exportFontSize,
+    'xaxis.tickfont.size': exportFontSize,
+    'yaxis.tickfont.size': exportFontSize,
+    'xaxis.title.font.size': Math.round(exportFontSize * 1.17),
+    'yaxis.title.font.size': Math.round(exportFontSize * 1.17),
+    'xaxis.title.standoff': 30,
+    'yaxis.title.standoff': 30,
+    'margin.l': 100,
+    'margin.b': 70,
+  });
 
-      // Chart image
-      ctx.drawImage(img, 0, 0);
-
-      // Legend — grouped by CPU: label + dots
-      let cpuStyles2 = buildCpuStyles();
-      let cpuGroups2 = {};
-      let cpuOrder2 = [];
-      allTraces.forEach((t, i) => {
-        if (!cpuGroups2[t.cpu]) { cpuGroups2[t.cpu] = []; cpuOrder2.push(t.cpu); }
-        cpuGroups2[t.cpu].push(t);
-      });
-
-      let fontSize = 11 * scale;
-      ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
-      let dotR = 5 * scale;
-      let lineH = fontSize + 6 * scale;
-      let x = 10 * scale;
-      let y = img.height + fontSize;
-      let maxW = cw - 20 * scale;
-
-      cpuOrder2.forEach(cpu => {
-        let prefix = cpu + ': ';
-        let pw = ctx.measureText(prefix).width;
-        if (x + pw > maxW) { x = 10 * scale; y += lineH; }
-        ctx.fillStyle = '#ccc';
-        ctx.fillText(prefix, x, y);
-        x += pw;
-
-        cpuGroups2[cpu].forEach(t => {
-          let c = coreColor(cpuStyles2[t.cpu], t.core);
-          let cx = x + dotR;
-          let cy = y - fontSize * 0.35;
-          ctx.beginPath();
-          ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
-          ctx.fillStyle = c;
-          ctx.fill();
-          x += dotR * 2 + 3 * scale;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      Plotly.toImage(chartDiv, {
+        format: 'png',
+        width: exportW,
+        height: exportH,
+      }).then(function (chartUrl) {
+        // Restore original layout settings
+        Plotly.relayout(chartDiv, {
+          'font.size': null,
+          'xaxis.tickfont.size': null,
+          'yaxis.tickfont.size': null,
+          'xaxis.title.font.size': null,
+          'yaxis.title.font.size': null,
+          'xaxis.title.standoff': null,
+          'yaxis.title.standoff': null,
+          'margin.l': null,
+          'margin.b': null,
         });
+        // Restore original container size
+        chartDiv.style.width = prevW;
+        chartDiv.style.height = prevH;
+        chartDiv.style.minHeight = prevMinH;
+        requestAnimationFrame(() => Plotly.Plots.resize(chartDiv));
 
-        x += 14 * scale;
-        if (x > maxW) { x = 10 * scale; y += lineH; }
-      });
+        let img = new Image();
+        img.onload = function () {
+          // Compute legend row count for canvas height (simulate layout)
+          let cpuStyles3 = buildCpuStyles();
+          let cpuGroups3 = {};
+          let cpuOrder3 = [];
+          allTraces.forEach(t => {
+            if (!cpuGroups3[t.cpu]) { cpuGroups3[t.cpu] = []; cpuOrder3.push(t.cpu); }
+            cpuGroups3[t.cpu].push(t);
+          });
+          let legendRows = 1;
+          let simX = legendX;
+          cpuOrder3.forEach(cpu => {
+            let pw = (cpu + ': ').length * legendFontSize * 0.55; // approximate text width
+            if (simX + pw > legendMaxW) { simX = legendX; legendRows++; }
+            simX += pw;
+            cpuGroups3[cpu].forEach(() => {
+              let dotW = legendDotR * 2 + legendDotSpacing;
+              if (simX + dotW > legendMaxW) { simX = legendX; legendRows++; }
+              simX += dotW;
+            });
+            simX += legendCpuGap;
+            if (simX > legendMaxW) { simX = legendX; legendRows++; }
+          });
 
-      canvas.toBlob(function (blob) {
-        let url = URL.createObjectURL(blob);
-        let a = document.createElement('a');
-        a.href = url;
-        a.download = 'latency-chart.png';
-        a.click();
-        URL.revokeObjectURL(url);
-        if (wasVis) tooltip.style.display = 'block';
+          let lh = legendRows * legendLineH + Math.round(12 * scale * ls);
+          let cw = img.width;
+          let ch = img.height + lh;
+
+          let canvas = document.createElement('canvas');
+          canvas.width = cw;
+          canvas.height = ch;
+          let ctx = canvas.getContext('2d');
+
+          // Background
+          ctx.fillStyle = '#1a1a2e';
+          ctx.fillRect(0, 0, cw, ch);
+
+          // Chart image
+          ctx.drawImage(img, 0, 0);
+
+          // Legend — grouped by CPU: label + dots
+          let cpuStyles2 = buildCpuStyles();
+          let cpuGroups2 = {};
+          let cpuOrder2 = [];
+          allTraces.forEach((t, i) => {
+            if (!cpuGroups2[t.cpu]) { cpuGroups2[t.cpu] = []; cpuOrder2.push(t.cpu); }
+            cpuGroups2[t.cpu].push(t);
+          });
+
+          ctx.font = `${legendFontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+          let x = legendX;
+          let y = img.height + legendFontSize;
+
+          cpuOrder2.forEach(cpu => {
+            let prefix = cpu + ': ';
+            let pw = ctx.measureText(prefix).width;
+            if (x + pw > legendMaxW) { x = legendX; y += legendLineH; }
+            ctx.fillStyle = '#ccc';
+            ctx.fillText(prefix, x, y);
+            x += pw;
+
+            cpuGroups2[cpu].forEach(t => {
+              let dotW = legendDotR * 2 + legendDotSpacing;
+              if (x + dotW > legendMaxW) { x = legendX; y += legendLineH; }
+              let c = coreColor(cpuStyles2[t.cpu], t.core);
+              let cx = x + legendDotR;
+              let cy = y - legendFontSize * 0.35;
+              ctx.beginPath();
+              ctx.arc(cx, cy, legendDotR, 0, Math.PI * 2);
+              ctx.fillStyle = c;
+              ctx.fill();
+              x += dotW;
+            });
+
+            x += legendCpuGap;
+            if (x > legendMaxW) { x = legendX; y += legendLineH; }
+          });
+
+          canvas.toBlob(function (blob) {
+            let url = URL.createObjectURL(blob);
+            let a = document.createElement('a');
+            a.href = url;
+            a.download = 'latency-chart.png';
+            a.click();
+            URL.revokeObjectURL(url);
+            if (wasVis) tooltip.style.display = 'block';
+          });
+        };
+        img.src = chartUrl;
       });
-    };
-    img.src = chartUrl;
+    });
   });
 }
 
