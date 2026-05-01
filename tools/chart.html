@@ -16,7 +16,7 @@
   #drop.drag-over { border-color: #e94560; background: rgba(233,69,96,0.05); }
   #drop.has-data { min-height: 60px; margin: 8px 16px; }
   #drop p { color: #666; font-size: 18px; pointer-events: none; }
-  #chart { flex: 1; min-height: 500px; display: none; margin: 0 16px 16px; }
+  #chart { flex: 1; width: calc(100% - 32px); min-height: 500px; display: none; margin: 0 16px 16px; }
   #chart.visible { display: block; }
   .toast { position: fixed; top: 16px; right: 16px; padding: 12px 20px; border-radius: 4px; font-size: 14px; z-index: 999; animation: fadeIn 0.3s; }
   .toast.error { background: #e94560; color: #fff; }
@@ -161,10 +161,25 @@ function render() {
     plot_bgcolor: '#1a1a2e',
     paper_bgcolor: '#1a1a2e',
     font: { color: '#eee' },
-    margin: { t: 20, r: 20, b: 100, l: 60 },
+    margin: { t: 20, r: 20, b: 120, l: 60 },
+    autosize: true,
   };
 
   Plotly.react(chartDiv, plotTraces, layout, { responsive: true });
+
+  chartDiv.classList.add('visible');
+  drop.classList.add('has-data');
+  btnClear.disabled = false;
+  btnExport.disabled = false;
+  fileCount.textContent = fileNames.size + ' file(s) loaded';
+}
+
+// --- Responsive resize ---
+window.addEventListener('resize', () => {
+  if (chartDiv.classList.contains('visible')) {
+    Plotly.Plots.resize(chartDiv);
+  }
+});
 
   chartDiv.classList.add('visible');
   drop.classList.add('has-data');
