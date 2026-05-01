@@ -365,5 +365,8 @@ FodyWeavers.xsd
 # Worktree isolation
 .worktrees/
 
+# Superpowers visual companion
+.superpowers/
+
 #cert
 myCA.*

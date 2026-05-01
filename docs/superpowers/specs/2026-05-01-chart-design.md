@@ -2,7 +2,7 @@
 
 ## Overview
 
-A zero-dependency single-file HTML chart tool that renders memory latency curves from memLatency CSV output. Drag-and-drop multiple CSV files (from different CPUs or benchmark runs), see interactive latency curves with per-core color coding, and export to PNG.
+A single-file HTML chart tool that renders memory latency curves from memLatency CSV output. Drag-and-drop multiple CSV files, see interactive latency curves with per-core color coding, and export to PNG. No build step, no server. JS libraries vendored locally for offline use.
 
 Also updates memLatency's CSV format to include a `cpu` column for self-contained CPU identification.
 
@@ -38,24 +38,23 @@ cpu,core,size(KB),ns
 
 Single static HTML file. No build step, no server, no dependencies beyond CDN-loaded Plotly.js and Papa Parse.
 
-### Dependencies (CDN)
+### Dependencies (vendored, local files)
 
-| Library | URL | Purpose |
-|---------|-----|---------|
-| Plotly.js | `cdn.plot.ly/plotly-latest.min.js` | Chart rendering, interactivity, PNG export |
-| Papa Parse | `cdn.jsdelivr.net/npm/papaparse` | Robust CSV parsing |
+| Library | Path | Purpose |
+|---------|------|---------|
+| Plotly.js | `vendor/plotly-latest.min.js` | Chart rendering, interactivity, PNG export |
+| Papa Parse | `vendor/papaparse.min.js` | Robust CSV parsing |
+
+Both files are downloaded once during setup and committed to the repo. No CDN calls at runtime — works fully offline.
 
 ### Structure
 
 ```
-chart.html
-├── <style>           — drop zone, buttons, layout
-├── <div id="drop">   — drag-and-drop target area
-├── <div id="chart">  — Plotly chart container
-├── <button>          — Export PNG, Clear, etc.
-├── <script src="...">— Plotly CDN
-├── <script src="...">— Papa Parse CDN
-└── <script>          — application logic
+tools/
+├── chart.html              — main HTML file
+└── vendor/
+    ├── plotly-latest.min.js
+    └── papaparse.min.js
 ```
 
 ### Workflow
@@ -127,7 +126,8 @@ color   = HSL(hue, 70%, 50%)
 
 ## Scope
 
-This spec covers two changes:
+This spec covers three changes:
 
 1. **memLatency CSV format** — add `cpu` column (small change to `main.cpp`).
 2. **chart.html** — new standalone file in `tools/` directory, not part of the MSBuild solution.
+3. **Vendor JS libraries** — download Plotly.js and Papa Parse to `tools/vendor/` for offline use.
