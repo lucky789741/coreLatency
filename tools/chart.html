@@ -6,7 +6,7 @@
 <title>Memory Latency Chart</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; flex-direction: column; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
   .toolbar { display: flex; gap: 8px; padding: 12px 16px; background: #16213e; border-bottom: 1px solid #0f3460; align-items: center; }
   .toolbar button { padding: 8px 16px; border: 1px solid #0f3460; border-radius: 4px; cursor: pointer; font-size: 14px; background: #0f3460; color: #eee; }
   .toolbar button:hover { background: #1a508b; }
@@ -14,13 +14,26 @@
   .toolbar .file-count { margin-left: auto; font-size: 13px; color: #888; }
   #drop { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 300px; margin: 16px; border: 2px dashed #0f3460; border-radius: 8px; transition: border-color 0.2s, background 0.2s; }
   #drop.drag-over { border-color: #e94560; background: rgba(233,69,96,0.05); }
-  #drop.has-data { min-height: 60px; margin: 8px 16px; }
+  #drop.has-data { flex: 0 0 auto; min-height: 60px; margin: 8px 16px; }
   #drop p { color: #666; font-size: 18px; pointer-events: none; }
-  #chart { flex: 1; width: calc(100% - 32px); min-height: 500px; display: none; margin: 0 16px 16px; }
+  #chart { flex: 1 1 0%; width: calc(100% - 32px); min-height: 0; display: none; margin: 0 16px; }
   #chart.visible { display: block; }
+  #htmlLegend { display: none; flex-wrap: wrap; align-items: center; gap: 2px 4px; padding: 6px 16px; font-size: 13px; }
+  #htmlLegend.visible { display: flex; }
+  #htmlLegend .legend-cpu-label { color: #ccc; white-space: nowrap; cursor: pointer; transition: color 0.15s; }
+  #htmlLegend .legend-cpu-label:hover { color: #fff; }
+  #htmlLegend .legend-cpu-label.off { opacity: 0.3; }
+  #htmlLegend .legend-dot { display: inline-block; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; transition: transform 0.15s, opacity 0.15s; flex-shrink: 0; }
+  #htmlLegend .legend-dot:hover { transform: scale(1.6); }
+  #htmlLegend .legend-dot.off { opacity: 0.15; }
+  #htmlLegend .legend-gap { display: inline-block; width: 14px; flex-shrink: 0; }
   .toast { position: fixed; top: 16px; right: 16px; padding: 12px 20px; border-radius: 4px; font-size: 14px; z-index: 999; animation: fadeIn 0.3s; }
   .toast.error { background: #e94560; color: #fff; }
   .toast.info { background: #0f3460; color: #eee; }
+  .js-plotly-plot .hoverlayer { visibility: hidden; }
+  #chart .js-plotly-plot,
+  #chart .plot-container,
+  #chart .svg-container { width: 100% !important; height: 100% !important; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 </head>
@@ -34,6 +47,7 @@
 
 <div id="drop"><p>Drop CSV files here</p></div>
 <div id="chart"></div>
+<div id="htmlLegend"></div>
 
 <script src="vendor/plotly-latest.min.js"></script>
 <script src="vendor/papaparse.min.js"></script>
@@ -42,24 +56,45 @@
 let allTraces = [];       // { cpu, core, filename, x:[], y:[] }
 let fileNames = new Set();
 
-// --- djb2 hash ---
-function djb2(str) {
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash) + str.charCodeAt(i);
-  return hash >>> 0;
+// --- Per-CPU styling ---
+const DASHES = ['solid', 'dash', 'dot', 'dashdot', 'longdash', 'longdashdot'];
+const SYMBOLS = ['circle', 'square', 'diamond', 'cross', 'x', 'triangle-up', 'triangle-down', 'star'];
+
+function hashStr(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i);
+  return h >>> 0;
 }
 
-// --- Color from CPU name + core index ---
-function traceColor(cpu, coreIdx, coreCount) {
-  let base = (djb2(cpu) % 360);
-  let gap = Math.max(8, Math.floor(60 / Math.max(coreCount, 1)));
-  let hue = (base + coreIdx * gap) % 360;
+function buildCpuStyles() {
+  let cpuList = [...new Set(allTraces.map(t => t.cpu))].sort();
+  let map = {};
+  cpuList.forEach((cpu, i) => {
+    let baseHue = hashStr(cpu) % 360;
+    let cores = [...new Set(allTraces.filter(t => t.cpu === cpu).map(t => t.core))].sort((a, b) => a - b);
+    map[cpu] = {
+      baseHue,
+      dash: DASHES[i % DASHES.length],
+      symbol: SYMBOLS[i % SYMBOLS.length],
+      coreCount: cores.length,
+      coreIdx: Object.fromEntries(cores.map((c, j) => [c, j])),
+    };
+  });
+  return map;
+}
+
+function coreColor(style, core) {
+  let coreIdx = style.coreIdx[core];
+  let hueSpan = Math.min(30, Math.max(5, 30 / Math.max(style.coreCount, 1)));
+  let hue = (style.baseHue - 15 + coreIdx * hueSpan) % 360;
+  if (hue < 0) hue += 360;
   return `hsl(${hue}, 70%, 50%)`;
 }
 
 // --- Drop zone ---
 const drop = document.getElementById('drop');
 const chartDiv = document.getElementById('chart');
+const htmlLegend = document.getElementById('htmlLegend');
 const btnClear = document.getElementById('btnClear');
 const btnExport = document.getElementById('btnExport');
 const fileCount = document.getElementById('fileCount');
@@ -113,7 +148,6 @@ function parseCSV(file) {
           filename: file.name,
           x: g.x,
           y: g.y,
-          color: traceColor(g.cpu, g.core, coreCount),
         });
       });
 
@@ -126,19 +160,108 @@ function parseCSV(file) {
   });
 }
 
+// --- HTML Legend ---
+function buildLegend() {
+  htmlLegend.innerHTML = '';
+  let cpuStyles = buildCpuStyles();
+
+  let cpuGroups = {};
+  let cpuOrder = [];
+  allTraces.forEach((t, i) => {
+    if (!cpuGroups[t.cpu]) { cpuGroups[t.cpu] = []; cpuOrder.push(t.cpu); }
+    cpuGroups[t.cpu].push({ trace: t, index: i, dot: null });
+  });
+
+  cpuOrder.forEach(cpu => {
+    let entries = cpuGroups[cpu];
+    let cpuIndices = entries.map(g => g.index);
+    let otherIndices = allTraces.map((_, j) => j).filter(j => !cpuIndices.includes(j));
+
+    let label = document.createElement('span');
+    label.className = 'legend-cpu-label';
+    label.textContent = cpu + ':';
+    label.addEventListener('click', () => {
+      let off = label.classList.toggle('off');
+      entries.forEach(g => {
+        if (off) g.dot.classList.add('off');
+        else g.dot.classList.remove('off');
+      });
+      Plotly.restyle(chartDiv, { visible: off ? 'legendonly' : true }, cpuIndices);
+    });
+    label.addEventListener('mouseenter', () => {
+      if (label.classList.contains('off')) return;
+      Plotly.restyle(chartDiv, { 'line.width': 4 }, cpuIndices);
+      if (otherIndices.length > 0) Plotly.restyle(chartDiv, { opacity: 0.12 }, otherIndices);
+    });
+    label.addEventListener('mouseleave', () => {
+      if (label.classList.contains('off')) return;
+      Plotly.restyle(chartDiv, { 'line.width': 2, opacity: 1 }, allTraces.map((_, j) => j));
+    });
+    htmlLegend.appendChild(label);
+
+    entries.forEach(g => {
+      let t = g.trace;
+      let i = g.index;
+      let color = coreColor(cpuStyles[t.cpu], t.core);
+      let dot = document.createElement('span');
+      dot.className = 'legend-dot';
+      dot.title = 'core' + t.core;
+      dot.style.backgroundColor = color;
+      g.dot = dot;
+
+      dot.addEventListener('click', () => {
+        let off = dot.classList.toggle('off');
+        Plotly.restyle(chartDiv, { visible: off ? 'legendonly' : true }, [i]);
+        let allOff = entries.every(g => g.dot.classList.contains('off'));
+        if (allOff) label.classList.add('off');
+        else label.classList.remove('off');
+      });
+      dot.addEventListener('mouseenter', () => {
+        if (dot.classList.contains('off')) return;
+        dot.style.transform = 'scale(2.4)';
+        let otherIndices = allTraces.map((_, j) => j).filter(j => j !== i);
+        Plotly.restyle(chartDiv, { 'line.width': 4 }, [i]);
+        if (otherIndices.length > 0) Plotly.restyle(chartDiv, { opacity: 0.12 }, otherIndices);
+      });
+      dot.addEventListener('mouseleave', () => {
+        if (dot.classList.contains('off')) return;
+        dot.style.transform = '';
+        Plotly.restyle(chartDiv, { 'line.width': 2, opacity: 1 }, allTraces.map((_, j) => j));
+      });
+
+      htmlLegend.appendChild(dot);
+    });
+
+    let gap = document.createElement('span');
+    gap.className = 'legend-gap';
+    htmlLegend.appendChild(gap);
+  });
+
+  htmlLegend.classList.add('visible');
+  chartDiv.style.marginBottom = '0';
+}
+
 // --- Plotly render ---
 function render() {
   if (allTraces.length === 0) return;
 
-  let plotTraces = allTraces.map(t => ({
-    x: t.x,
-    y: t.y,
-    type: 'scatter',
-    mode: 'lines',
-    name: t.cpu + ' / core' + t.core,
-    line: { color: t.color, width: 2 },
-    hovertemplate: `<b>${t.cpu}</b><br>core${t.core}  size=%{x:.1f} KB  ns=%{y:.1f}<extra></extra>`,
-  }));
+  let cpuStyles = buildCpuStyles();
+
+  let plotTraces = allTraces.map(t => {
+    let s = cpuStyles[t.cpu];
+    let c = coreColor(s, t.core);
+    return {
+      x: t.x,
+      y: t.y,
+      type: 'scatter',
+      mode: 'lines+markers',
+      name: t.cpu + ' / core' + t.core,
+      line: { color: c, width: 2, dash: s.dash },
+      marker: { color: c, size: 4, symbol: s.symbol },
+      hovertemplate: `%{y:.1f} ns<extra></extra>`,
+      showlegend: false,
+    };
+  });
 
   // Compute data range for axis bounds
   let allX = allTraces.flatMap(t => t.x);
@@ -154,19 +277,71 @@ function render() {
   }
 
   let layout = {
+    hovermode: 'x unified',
+    hoverlabel: { bgcolor: 'transparent', bordercolor: 'transparent', font: { size: 0, color: 'transparent' } },
     xaxis: { title: 'Buffer size (KB)', type: 'log', tickvals: tickVals,
              gridcolor: '#333', zeroline: false },
     yaxis: { title: 'Latency (ns)', gridcolor: '#333', zeroline: false },
-    legend: { orientation: 'h', y: -0.2, font: { color: '#ccc', size: 11 } },
+    showlegend: false,
     plot_bgcolor: '#1a1a2e',
     paper_bgcolor: '#1a1a2e',
     font: { color: '#eee' },
-    margin: { t: 20, r: 20, b: 120, l: 60 },
+    margin: { t: 20, r: 60, b: 40, l: 60 },
     autosize: true,
   };
 
   Plotly.react(chartDiv, plotTraces, layout, { responsive: true });
-  Plotly.Plots.resize(chartDiv);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => Plotly.Plots.resize(chartDiv));
+  });
+
+  // HTML tooltip overlay (SVG annotations can't render HTML)
+  let tooltip = document.getElementById('chart-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'chart-tooltip';
+    tooltip.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:100;background:rgba(22,33,62,0.94);color:#eee;padding:6px 10px;border-radius:4px;font-size:12px;max-width:440px;';
+    chartDiv.parentNode.appendChild(tooltip);
+  }
+
+  chartDiv.removeAllListeners && chartDiv.removeAllListeners('plotly_hover');
+  chartDiv.removeAllListeners && chartDiv.removeAllListeners('plotly_unhover');
+  chartDiv.on('plotly_hover', function(data) {
+    let pts = data.points.map(p => ({
+      curveNumber: p.curveNumber,
+      y: p.y,
+      color: p.data.line.color,
+    }));
+    pts.sort((a, b) => a.y - b.y);
+
+    let sizeKB = data.points[0].x;
+
+    let mid = Math.ceil(pts.length / 2);
+    let col = (arr) => arr.map(p => {
+      let t = allTraces[p.curveNumber];
+      return `<div style="white-space:nowrap"><span style="color:${p.color}">●</span> <b>${p.y.toFixed(1)}</b> ns</div>`;
+    }).join('');
+
+    tooltip.innerHTML = `<b>size = ${sizeKB.toFixed(1)} KB</b>` +
+      `<div style="display:flex;gap:6px 16px;flex-wrap:wrap;max-width:420px;font-size:10px;margin-top:2px">` +
+      `<div>${col(pts.slice(0, mid))}</div><div>${col(pts.slice(mid))}</div></div>`;
+
+    tooltip.style.display = 'block';
+    let x = data.event.clientX + 15;
+    let y = data.event.clientY - 10;
+    let tw = tooltip.offsetWidth;
+    let th = tooltip.offsetHeight;
+    if (x + tw > window.innerWidth) x = data.event.clientX - tw - 15;
+    if (y + th > window.innerHeight) y = data.event.clientY - th - 10;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  });
+
+  chartDiv.on('plotly_unhover', function() {
+    tooltip.style.display = 'none';
+  });
+
+  buildLegend();
 
   chartDiv.classList.add('visible');
   drop.classList.add('has-data');
@@ -178,7 +353,9 @@ function render() {
 // --- Responsive resize ---
 window.addEventListener('resize', () => {
   if (chartDiv.classList.contains('visible')) {
-    Plotly.Plots.resize(chartDiv);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => Plotly.Plots.resize(chartDiv));
+    });
   }
 });
 
@@ -186,6 +363,11 @@ window.addEventListener('resize', () => {
 function clearAll() {
   allTraces = [];
   fileNames.clear();
+  let tooltip = document.getElementById('chart-tooltip');
+  if (tooltip) tooltip.style.display = 'none';
+  htmlLegend.innerHTML = '';
+  htmlLegend.classList.remove('visible');
+  chartDiv.style.marginBottom = '';
   Plotly.purge(chartDiv);
   chartDiv.classList.remove('visible');
   drop.classList.remove('has-data');
@@ -195,10 +377,93 @@ function clearAll() {
   toast('Cleared all data', 'info');
 }
 
-// --- Export PNG ---
+// --- Export PNG (chart + HTML legend composited on canvas) ---
 function exportPNG() {
   if (allTraces.length === 0) return;
-  Plotly.downloadImage(chartDiv, { format: 'png', width: 1920, height: 1080, filename: 'latency-chart' });
+
+  let tooltip = document.getElementById('chart-tooltip');
+  let wasVis = tooltip && tooltip.style.display === 'block';
+  if (wasVis) tooltip.style.display = 'none';
+
+  let chartRect = chartDiv.getBoundingClientRect();
+  let legendRect = htmlLegend.getBoundingClientRect();
+  let scale = 2;
+
+  Plotly.toImage(chartDiv, {
+    format: 'png',
+    width: Math.round(chartRect.width * scale),
+    height: Math.round(chartRect.height * scale),
+  }).then(function (chartUrl) {
+    let img = new Image();
+    img.onload = function () {
+      let lh = Math.round(legendRect.height * scale) + 8 * scale;
+      let cw = img.width;
+      let ch = img.height + lh;
+
+      let canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      let ctx = canvas.getContext('2d');
+
+      // Background
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, cw, ch);
+
+      // Chart image
+      ctx.drawImage(img, 0, 0);
+
+      // Legend — grouped by CPU: label + dots
+      let cpuStyles2 = buildCpuStyles();
+      let cpuGroups2 = {};
+      let cpuOrder2 = [];
+      allTraces.forEach((t, i) => {
+        if (!cpuGroups2[t.cpu]) { cpuGroups2[t.cpu] = []; cpuOrder2.push(t.cpu); }
+        cpuGroups2[t.cpu].push(t);
+      });
+
+      let fontSize = 11 * scale;
+      ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+      let dotR = 5 * scale;
+      let lineH = fontSize + 6 * scale;
+      let x = 10 * scale;
+      let y = img.height + fontSize;
+      let maxW = cw - 20 * scale;
+
+      cpuOrder2.forEach(cpu => {
+        let prefix = cpu + ': ';
+        let pw = ctx.measureText(prefix).width;
+        if (x + pw > maxW) { x = 10 * scale; y += lineH; }
+        ctx.fillStyle = '#ccc';
+        ctx.fillText(prefix, x, y);
+        x += pw;
+
+        cpuGroups2[cpu].forEach(t => {
+          let c = coreColor(cpuStyles2[t.cpu], t.core);
+          let cx = x + dotR;
+          let cy = y - fontSize * 0.35;
+          ctx.beginPath();
+          ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+          ctx.fillStyle = c;
+          ctx.fill();
+          x += dotR * 2 + 3 * scale;
+        });
+
+        x += 14 * scale;
+        if (x > maxW) { x = 10 * scale; y += lineH; }
+      });
+
+      canvas.toBlob(function (blob) {
+        let url = URL.createObjectURL(blob);
+        let a = document.createElement('a');
+        a.href = url;
+        a.download = 'latency-chart.png';
+        a.click();
+        URL.revokeObjectURL(url);
+        if (wasVis) tooltip.style.display = 'block';
+      });
+    };
+    img.src = chartUrl;
+  });
 }
 
 // --- Toast ---

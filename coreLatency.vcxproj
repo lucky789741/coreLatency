@@ -17,12 +17,12 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-  </ItemGroup>
+</ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{ab0b9a6c-4cc9-4f14-a639-d414a929a2f5}</ProjectGuid>
-    <RootNamespace>coreLatencyIUC</RootNamespace>
+    <RootNamespace>coreLatency</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>coreLatency</ProjectName>
   </PropertyGroup>
@@ -169,7 +169,7 @@
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
-      <ErrorText>此專案參考這部電腦上所缺少的 NuGet 套件。請啟用 NuGet 套件還原，以下載該套件。如需詳細資訊，請參閱 http://go.microsoft.com/fwlink/?LinkID=322105。缺少的檔案是 {0}。</ErrorText>
+      <ErrorText>This project references NuGet packages that are missing on this computer. Use NuGet Package Restore to download them. The missing file is {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('packages\boost.1.80.0\build\boost.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\boost.1.80.0\build\boost.targets'))" />
     <Error Condition="!Exists('packages\boost_program_options-vc143.1.80.0\build\boost_program_options-vc143.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\boost_program_options-vc143.1.80.0\build\boost_program_options-vc143.targets'))" />
